@@ -1,0 +1,32 @@
+# MARBLE-PLM contrastive pretraining config (PLM-only alignment, λ=0)
+# Pretrains on panels v3 + v5 (where protein mutation data is available)
+
+dataset:
+  path_to_bags: /path/to/tile_embeddings/train/
+  train_parquet: /path/to/train_wsi.dataset.parquet
+  excl_list: /path/to/combined_exclusion_slide_list.csv
+  panel_label_mapping: /path/to/msk_impact_pancancer_biomarker_panel-v4-label_mapping.csv
+  biomarker_names: /path/to/biomarker_names_v6-v7.npy
+  cancer_gene_list: /path/to/cancerGeneList.tsv
+  drop_biomarkers: /path/to/biomarker_to_drop.npy
+  drop_patients: /path/to/failed_qc_train.npy
+  impact_version: /path/to/impact_version/wsi.dataset.parquet
+  embs_esm2: /path/to/esm2_embeds.npy
+  cbio_mut_file: /path/to/data_mutations.txt
+  max_len: 25000
+
+training:
+  batch_size: 16
+  num_workers: 6
+  num_epochs: 50
+  lr: 0.0001
+  weight_decay: 0.05
+
+model:
+  in_features: 1280
+  layer1_out: 320
+  layer2_out: 640
+  n_attention_queries: 16
+  num_classes: 1637
+  checkpoint_dir: /path/to/checkpoints/marble_plm/
+  log_dir: /path/to/logs/marble_plm/

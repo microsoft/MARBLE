@@ -1,33 +1,170 @@
-# Project
+# MARBLE: Multimodal Alignment foR Biomarker Learning and gEneralization
 
-> This repo has been populated by an initial template to help get you started. Please
-> make sure to update the content to build a great experience for community-building.
+Official code for the paper:
 
-As the maintainer of this project, please make a few updates:
+> **Multimodal Alignment Improves Generalizability of Genomic Biomarker Prediction in Computational Pathology**
+>
+> Ekaterina Redekop, Eric Zimmermann, Ava P Amini, Alex X Lu, Neil Tenenholtz, James Hall, Lorin Crawford, Kristen A Severson
+>
+> Microsoft Research, Cambridge, MA
 
-- Improving this README.MD file to provide a great experience
-- Updating SUPPORT.MD with content about this project's support experience
-- Understanding the security reporting process in SECURITY.MD
-- Remove this section from the README
+MARBLE is a multimodal contrastive pretraining strategy that aligns histopathology image representations with genomic biomarker representations derived from a large language model (LLM) and a protein language model (PLM). This alignment enables data-efficient generalization to novel, out-of-distribution biomarkers.
 
-## Contributing
+## Overview
 
-This project welcomes contributions and suggestions.  Most contributions require you to agree to a
-Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
-the rights to use your contribution. For details, visit [Contributor License Agreements](https://cla.opensource.microsoft.com).
+![MARBLE Overview](assets/marble_overview.pdf)
 
-When you submit a pull request, a CLA bot will automatically determine whether you need to provide
-a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions
-provided by the bot. You will only need to do this once across all repos using our CLA.
+MARBLE consists of two stages:
 
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
-For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
-contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+1. **Contrastive Pretraining**: Aggregated histopathology embeddings (from a frozen pathology foundation model Virchow2) are aligned with aggregated biomarker embeddings derived from a frozen LLM (GPT-4o + Sentence-BERT) and/or a frozen PLM (ESM-2) via contrastive learning.
+2. **Supervised Fine-tuning**: The image-only aggregator (initialized from pretraining) is fine-tuned with a multi-label classification head to predict biomarker status.
 
-## Trademarks
+## Repository Structure
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft
-trademarks or logos is subject to and must follow
-[Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/legal/intellectualproperty/trademarks/usage/general).
-Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
-Any use of third-party trademarks or logos are subject to those third-party's policies.
+```
+MARBLE/
+├── README.md
+├── requirements.txt
+├── configs/                        # Example configuration files
+│   ├── pretrain_llm.yaml           # MARBLE-LLM pretraining (Scenario 1)
+│   ├── pretrain_plm.yaml           # MARBLE-PLM pretraining (Scenario 2)
+│   ├── pretrain_llm_plm.yaml       # MARBLE joint pretraining (Scenario 3)
+│   └── finetune.yaml               # Supervised fine-tuning
+├── embeddings/                     # Biomarker embedding generation
+│   ├── generate_llm_embeddings.py  # GPT-4o → SBERT pipeline
+│   ├── generate_plm_embeddings.py  # Mutated protein → ESM-2 pipeline
+│   └── protein_editing.py          # HGVS protein sequence editing utilities
+├── marble/                         # Core model code
+│   ├── model.py                    # MARBLE model variants
+│   ├── modules.py                  # Projection head
+│   ├── aggregator.py               # Agata tile aggregator
+│   ├── loss.py                     # Contrastive and BCE losses
+│   ├── dataset.py                  # Dataset classes for pretraining and fine-tuning
+│   └── utils.py                    # Utilities (seed, checkpointing, metrics)
+├── train_pretrain.py               # Contrastive pretraining (MARBLE-LLM, λ=1)
+├── train_pretrain_plm.py           # Contrastive pretraining (MARBLE-PLM, λ=0)
+├── train_pretrain_llm_plm.py       # Contrastive pretraining (MARBLE, λ=0.5)
+└── train_finetune.py               # Supervised fine-tuning
+```
+
+## Setup
+
+### Requirements
+
+- Python ≥ 3.9
+- PyTorch ≥ 2.0
+- CUDA-capable GPU(s)
+
+```bash
+pip install -r requirements.txt
+```
+
+### Data Preparation
+
+This codebase was developed using the [MSK-IMPACT](https://www.mskcc.org/msk-impact) cohort. To use your own data, you will need:
+
+1. **Tile embeddings**: Pre-extracted tile-level embeddings from a pathology foundation model (e.g., [Virchow2](https://arxiv.org/abs/2408.00738)).
+2. **Biomarker labels**: A parquet file with patient-level biomarker labels and metadata.
+3. **Biomarker embeddings** (for pretraining):
+   - **LLM-based**: Generate text descriptions of biomarkers using GPT-4o, then embed with Sentence-BERT (see Step 1 below).
+   - **PLM-based**: Construct mutated protein sequences and embed with ESM-2 (see Step 2 below).
+
+## Usage
+
+### Step 1: Generate LLM-based Biomarker Embeddings
+
+For each biomarker (gene + mutation + cancer type), we prompt GPT-4o to produce a concise description, then embed it with Sentence-BERT.
+
+```bash
+python embeddings/generate_llm_embeddings.py \
+    --descriptions_pkl /path/to/llm_descriptions.pkl \
+    --output_pkl /path/to/llm_sbert_embeddings.pkl
+```
+
+The input `descriptions_pkl` should be a dictionary `{sample_id: [list of text descriptions]}` generated by prompting GPT-4o with the template shown in the paper (Fig. S1).
+
+### Step 2: Generate PLM-based Biomarker Embeddings
+
+Construct mutated amino acid sequences from HGVS annotations and embed them with ESM-2.
+
+```bash
+# Step 2a: Generate mutated protein sequences from mutation data
+python embeddings/generate_plm_embeddings.py \
+    --mutations_file /path/to/data_mutations.txt \
+    --output_npy /path/to/esm2_embeddings.npy
+```
+
+### Step 3: Contrastive Pretraining
+
+**MARBLE-LLM** (Scenario 1: LLM-only alignment, using panels v3+v5+v6):
+
+```bash
+torchrun --nproc_per_node=4 train_pretrain.py \
+    --config configs/pretrain_llm.yaml
+```
+
+**MARBLE-PLM** (Scenario 2: PLM-only alignment, using panels v3+v5):
+
+```bash
+torchrun --nproc_per_node=4 train_pretrain_plm.py \
+    --config configs/pretrain_plm.yaml
+```
+
+**MARBLE** (Scenario 3: Joint LLM+PLM alignment, using panels v3+v5):
+
+```bash
+torchrun --nproc_per_node=4 train_pretrain_llm_plm.py \
+    --config configs/pretrain_llm_plm.yaml
+```
+
+### Step 4: Supervised Fine-tuning
+
+Fine-tune the pretrained image aggregator for multi-label biomarker classification:
+
+```bash
+torchrun --nproc_per_node=4 train_finetune.py \
+    --config configs/finetune.yaml
+```
+
+Set `model.pretrained_checkpoint` in the config to the path of your pretrained MARBLE checkpoint. For the supervised baseline, leave this field empty.
+
+## Configuration
+
+All experiments are configured via YAML files. Key parameters:
+
+| Parameter | Description |
+|---|---|
+| `dataset.path_to_bags` | Directory containing `.asdf` tile embedding files |
+| `dataset.train_parquet` | Parquet file with training metadata and labels |
+| `dataset.panel_label_mapping` | CSV mapping biomarker indices to descriptions |
+| `training.batch_size` | Global batch size |
+| `training.lr` | Learning rate |
+| `training.weight_decay` | Weight decay |
+| `training.num_epochs` | Max epochs |
+| `model.in_features` | Tile embedding dimension (1280 for Virchow2) |
+| `model.n_attention_queries` | Number of Agata attention queries |
+
+## Model Variants
+
+| Variant | λ | Description |
+|---|---|---|
+| MARBLE-LLM | 1.0 | Alignment with LLM embeddings only |
+| MARBLE-PLM | 0.0 | Alignment with PLM embeddings only |
+| MARBLE | 0.5 | Joint alignment with both modalities |
+
+The total contrastive loss is: `L_total = λ · L_con^{im-LLM} + (1-λ) · L_con^{im-PLM}`
+
+## Citation
+
+```bibtex
+@article{redekop2026marble,
+  title={Multimodal Alignment Improves Generalizability of Genomic Biomarker Prediction in Computational Pathology},
+  author={Redekop, Ekaterina and Zimmermann, Eric and Amini, Ava P and Lu, Alex X and Tenenholtz, Neil and Hall, James Brian and Crawford, Lorin and Severson, Kristen A},
+  journal={arXiv preprint arXiv:2603.00193},
+  year={2026}
+}
+```
+
+## License
+
+This project is released under the MIT License.

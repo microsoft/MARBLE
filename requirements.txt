@@ -1,0 +1,11 @@
+torch>=2.0
+numpy
+pandas
+pyarrow
+scikit-learn
+tqdm
+omegaconf
+sentence-transformers
+fair-esm
+asdf
+requests

@@ -1,0 +1,30 @@
+# Supervised fine-tuning config
+# Fine-tunes the pretrained image aggregator for multi-label biomarker classification
+
+dataset:
+  path_to_bags: /path/to/tile_embeddings/train/
+  train_parquet: /path/to/train_wsi.dataset.parquet
+  excl_list: /path/to/combined_exclusion_slide_list.csv
+  panel_label_mapping: /path/to/msk_impact_pancancer_biomarker_panel-v4-label_mapping.csv
+  biomarker_names: /path/to/biomarker_names_v6-v7.npy
+  drop_biomarkers: /path/to/biomarker_to_drop.npy
+  drop_patients: /path/to/failed_qc_train.npy
+  impact_version: /path/to/impact_version/wsi.dataset.parquet
+  max_len: 25000
+
+training:
+  batch_size: 16
+  num_workers: 6
+  num_epochs: 20
+  lr: 0.0001
+  weight_decay: 0.05
+
+model:
+  in_features: 1280
+  layer1_out: 320
+  layer2_out: 640
+  n_attention_queries: 16
+  num_classes: 1611
+  # Set to path of MARBLE checkpoint for pretrained init, or leave empty for supervised baseline
+  pretrained_checkpoint: ""
+  checkpoint_dir: /path/to/checkpoints/finetune/
