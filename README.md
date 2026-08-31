@@ -12,7 +12,7 @@ MARBLE is a multimodal contrastive pretraining strategy that aligns histopatholo
 
 ## Overview
 
-![MARBLE Overview](assets/marble_overview.png)
+![MARBLE Overview](assets/marble-overview.png)
 
 MARBLE consists of two stages:
 
